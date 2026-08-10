@@ -55,12 +55,12 @@ export type PresetSubscription = Omit<
 
 /**
  * 登録フォームからサーバーへ渡す入力値
- * idはサーバー側(DB登録時)で採番するため含まない。
+ * idは保存時にデータ層で採番するため含まない。
  */
 export type SubscriptionInput = Omit<Subscription, 'id'>;
 
 /**
- * Server Actionの実行結果を表す共通の戻り値
+ * 追加・更新・削除の実行結果を表す共通の戻り値
  * 例外を握りつぶさず、UI側で日本語のエラーメッセージを表示できるようにする。
  */
 export type ActionResult =

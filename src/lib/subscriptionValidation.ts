@@ -1,7 +1,7 @@
 /**
  * サブスクリプション入力値のバリデーション
- * Server Actionはクライアントから任意の値を送信できるため、
- * DBへ渡す前にこのモジュールで必ず検証・正規化を行う。
+ * フォームの入力に加え、読み込んだバックアップファイルの内容も通るため、
+ * 保存する前にこのモジュールで必ず検証・正規化を行う。
  */
 import { CATEGORIES } from '@/constants/presets';
 import { BillingCycle, SubscriptionInput, SubscriptionStatus } from '@/types';
