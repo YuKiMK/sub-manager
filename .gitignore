@@ -1,0 +1,21 @@
+# 依存パッケージ
+/node_modules
+
+# ビルド成果物
+/.next/
+/out/
+*.tsbuildinfo
+next-env.d.ts
+
+# 個人データ (公開リポジトリに絶対に含めない)
+# 登録したサブスクの内容そのものであり、コードではない
+subscriptions.db
+subscriptions-*.json
+
+# 環境変数
+.env
+.env*.local
+
+# OS / エディタ
+.DS_Store
+Thumbs.db

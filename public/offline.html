@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+    <title>オフライン - SubManager</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #121212;
+        color: #f8f8f8;
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      main {
+        max-width: 28rem;
+        padding: 2rem 1.5rem;
+        text-align: center;
+      }
+      img { width: 72px; height: 72px; border-radius: 18px; margin-bottom: 1.5rem; }
+      h1 { font-size: 1.25rem; font-weight: 700; margin: 0 0 0.75rem; letter-spacing: -0.01em; }
+      p { font-size: 0.875rem; line-height: 1.7; color: #9ca3af; margin: 0 0 1.75rem; }
+      button {
+        appearance: none;
+        border: 0;
+        background: #bb86fc;
+        color: #000;
+        font-size: 1rem;
+        font-weight: 700;
+        border-radius: 0.75rem;
+        padding: 0.875rem 2rem;
+        cursor: pointer;
+        transition: filter 0.15s ease;
+      }
+      button:hover { filter: brightness(1.1); }
+      button:active { transform: scale(0.98); }
+    </style>
+  </head>
+  <body>
+    <main>
+      <!-- サブディレクトリへ公開される場合があるため相対パスで指定する -->
+      <img src="icons/icon-192.png" alt="" />
+      <h1>画面を読み込めませんでした</h1>
+      <p>
+        登録したデータはこの端末内に残っています。<br />
+        アプリの画面を取得できなかっただけなので、<br />
+        電波の状況を確認して、もう一度お試しください。
+      </p>
+      <button type="button" onclick="location.reload()">再読み込み</button>
+    </main>
+  </body>
+</html>

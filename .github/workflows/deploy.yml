@@ -1,0 +1,68 @@
+# 静的サイトとして書き出し、GitHub Pages へ公開する。
+#
+# 事前にリポジトリの Settings → Pages で Source を「GitHub Actions」にしておくこと。
+# HTTPS で配信されるため、スマホからPWAとして「インストール」できるようになる。
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  # 画面から手動でも実行できるようにしておく
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 公開は1度に1つだけ。実行中のものは完了させる (途中で止めると公開物が壊れるため)
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: ソースを取得
+        uses: actions/checkout@v4
+
+      - name: Node.js を用意
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Pages の設定を読み取る
+        id: pages
+        uses: actions/configure-pages@v5
+
+      - name: 依存パッケージを取得
+        run: npm ci
+
+      - name: 静的サイトを書き出す
+        env:
+          # リポジトリ名付きで公開される場合に `/<リポジトリ名>` が入る。
+          # <ユーザー名>.github.io リポジトリなら空になる。
+          NEXT_PUBLIC_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+        run: npm run build
+
+      - name: Jekyll による加工を止める
+        # `_next` のように下線で始まるディレクトリが無視されるのを防ぐ
+        run: touch out/.nojekyll
+
+      - name: 成果物をアップロード
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./out
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: 公開する
+        id: deployment
+        uses: actions/deploy-pages@v4
