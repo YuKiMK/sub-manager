@@ -1,5 +1,6 @@
 import { SubscriptionView } from "@/types";
 import { formatJPY } from "@/lib/utils";
+import { CYCLE_META } from "@/constants/cycles";
 import ServiceIcon from "@/components/ui/ServiceIcon";
 
 interface TopSpendersProps {
@@ -34,7 +35,7 @@ export default function TopSpenders({ subscriptions, monthlyTotal }: TopSpenders
           <div className="flex-1 min-w-0 pr-2">
             <p className="text-sm font-medium text-white truncate">{sub.name}</p>
             <p className="text-[10px] text-gray-500 mt-0.5">
-              {formatJPY(sub.price)}/{sub.cycle === "monthly" ? "月" : "年"}
+              {formatJPY(sub.price)}/{CYCLE_META[sub.cycle].unit}
               {monthlyTotal > 0 && (
                 <span className="ml-1.5">
                   全体の{Math.round((sub.monthlyEquivalentPrice / monthlyTotal) * 100)}%

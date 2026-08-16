@@ -26,7 +26,7 @@ GitHub Pages に置く（`.github/workflows/deploy.yml`）。この前提が全�
   - `/layout`: レイアウトコンポーネント (ボトムナビ、FAB等)
   - `/features`: 特定機能のコンポーネント
   - `/providers`: 全画面へ値を配るコンテキスト
-- `/src/constants`: 定数 (プリセット一覧、カテゴリ、公開先の接頭辞等。一元管理)
+- `/src/constants`: 定数 (プリセット、カテゴリ、周期、並び順、支払い方法、公開先の接頭辞。一元管理)
 - `/src/types`: TypeScriptの型定義
 - `/src/lib`: ユーティリティ、データ層
   - `localDb.ts`: IndexedDBの開閉とトランザクション
@@ -34,6 +34,9 @@ GitHub Pages に置く（`.github/workflows/deploy.yml`）。この前提が全�
   - `subscriptionService.ts`: 検証とリポジトリ呼び出しの窓口
   - `subscriptionValidation.ts`: 入力値の検証・正規化
   - `billing.ts`: 課金日の繰り越し・月額換算・集計ロジック
+  - `subscriptionFilter.ts`: 一覧の検索・絞り込み・並び替え (純粋関数)
+  - `storagePersistence.ts`: 保存領域の保護状態と使用量
+  - `appPreferences.ts`: 並び順・最終バックアップ日などの補助情報 (localStorage)
   - `id.ts`: id採番
 
 ## データフローの原則
@@ -94,6 +97,36 @@ Provider が行うため、画面側で再取得を書く必要はない。
 そのため `next dev` を起動したままビルドすることはできない（かつて使えた `NEXT_DIST_DIR` による
 分離は効かない）。先に dev サーバーを止めること。
 
+## 支払い周期 (cycle)
+`weekly` / `monthly` / `quarterly` / `semiannual` / `yearly` / `biennial` の6種。
+表示名と換算係数は `/src/constants/cycles.ts` の `CYCLE_META` に集約している。
+
+- 周期を増やすときは `CYCLE_META` に1行足すだけでよい。フォーム・一覧・集計に自動で反映される。
+- 月額換算・年額換算は `perYear`（1年あたりの請求回数）から求める。
+  画面ごとに `cycle === 'yearly' ? ... : ...` のような分岐を書かないこと。
+- 日付の加算は月数で行う（月末日を維持するため）。週次のみ日数で加算する。
+- **週次は1ヶ月に4〜5回発生する**。`getBillingDatesInMonth()` が配列を返すのはこのため。
+  月額換算は「1年=52週」で計算するため、実際の請求回数とは月によってずれる（実態どおり）。
+
+## 一覧の検索・並び替え
+登録が増えると一本道の一覧では目的のサービスに辿り着けないため、
+`SubscriptionFilterBar` から検索・カテゴリ絞り込み・並び替えを行う。
+判定ロジックは `subscriptionFilter.ts` に純粋関数として置き、画面側には持たせない。
+
+- 検索対象はサービス名・メモ・カテゴリ・支払い方法。空白区切りは AND。
+- 並び順だけ localStorage に記憶する。**検索語とカテゴリは記憶しない**
+  （次に開いたとき勝手に絞り込まれていると、登録が消えたように見えるため）。
+- 件数が少ないうちは操作バーを出さない（`CONTROLS_THRESHOLD`）。
+
+## データ保全 (端末内にしか無いことへの備え)
+ブラウザは保存領域が逼迫すると **断りなく IndexedDB を消す**。復元手段が無いため以下を用意している。
+
+- 登録が1件でもできた時点で `navigator.storage.persist()` を1度だけ要求する
+  （`SubscriptionProvider`）。要求済みかは localStorage に記録し、繰り返し確認を出さない。
+- 設定画面の `StoragePanel` で保護状態・使用量を表示し、手動でも要求できる。
+- 最後にJSONを書き出した日を記録し、45日以上経つとホームで促す（`BackupReminder`）。
+- **保護は失敗しうる**（Safariは `persist()` 自体が無い）。最終的な備えはJSONの書き出しである点は変わらない。
+
 ## 契約状態 (status)
 `active` / `trial` / `scheduled` / `cancelled` の4種。表示定義は `/src/constants/status.ts` に集約。
 - 実質月額合計・カテゴリ集計に入るのは **active のみ**。判定は `billing.ts` の `countsTowardTotal()` を使い、
@@ -109,6 +142,17 @@ Provider が行うため、画面側で再取得を書く必要はない。
 分析画面の推移グラフは今月起点の「今後12ヶ月の請求予定」であり、過去の月を足してはいけない
 （先月登録したサービスが半年前も契約されていたかは判断できず、必ず過少になるため）。
 実績を出したくなった場合は、請求日の経過を記録する payments テーブルの新設が必要。
+
+## 支払い方法 (paymentMethod)
+任意の自由入力。「カードを再発行したとき何を切り替えるか」を追えるようにするための項目。
+`/src/constants/paymentMethods.ts` の候補は入力補助であり、値をそこに限定しない
+（「楽天カード(1234)」のような書き方を許すため）。
+分析画面の内訳は、1件でも入力があるときだけ表示する。
+
+## 内訳の横棒グラフ
+カテゴリ別・支払い方法別は `components/ui/BreakdownBars` を共用する。
+並ぶ項目はいずれも順序を持たない名義尺度のため、**棒は全て同一色**とし、
+大小は棒の長さだけで表す（値の大小で色を変えるのは誤読を招くため行わない）。
 
 ## 保存項目を増やすとき
 IndexedDBは列定義を持たないため、`Subscription` 型と

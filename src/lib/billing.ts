@@ -3,19 +3,25 @@
  * 金額は全て日本円(JPY)の整数として扱い、外貨換算は一切行わない。
  * 日付は時差による1日のズレを避けるため、全てUTCの0時に正規化して計算する。
  */
+import { CYCLE_META } from '@/constants/cycles';
+import { PAYMENT_METHOD_UNSET } from '@/constants/paymentMethods';
 import {
   BillingCycle,
   CategorySummary,
   Category,
   MonthlySpending,
+  PaymentMethodSummary,
   Subscription,
   SubscriptionView,
 } from '@/types';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
-/** 繰り越し計算の無限ループを防ぐための上限 (月次で100年分) */
-const MAX_SHIFT_STEPS = 1200;
+/** 近似で求めた繰り越し回数を補正する際の上限 (無限ループ防止) */
+const MAX_ADJUST_STEPS = 64;
+
+/** 1ヶ月の平均日数。繰り越し回数の当たりを付けるためだけに使う */
+const AVERAGE_DAYS_PER_MONTH = 30.44;
 
 /**
  * YYYY-MM-DD 形式の文字列をUTC0時のDateへ変換する
@@ -61,10 +67,61 @@ function shiftMonthsFromAnchor(anchor: Date, monthsToAdd: number): Date {
 }
 
 /**
+ * 基準日から指定回数ぶん周期を進める (負の値で戻す)。
+ *
+ * 週次のみ日数で、それ以外は月数で進める。月数で進めるのは
+ * 「1/31 → 2/28 → 3/31」のように月末日の請求日を維持するため。
+ *
+ * @param anchor 基準日
+ * @param cycle 支払周期
+ * @param steps 進める周期の回数
+ */
+function shiftCycles(anchor: Date, cycle: BillingCycle, steps: number): Date {
+  const meta = CYCLE_META[cycle];
+
+  if (meta.days > 0) {
+    return new Date(anchor.getTime() + meta.days * steps * MS_PER_DAY);
+  }
+  return shiftMonthsFromAnchor(anchor, meta.months * steps);
+}
+
+/**
+ * 基準日から何回ぶん周期を進めれば target 以降になるかを求める。
+ *
+ * 周期が短い(週次など)と繰り返しが多くなるため、まず日数から当たりを付け、
+ * そこから前後にずらして条件を満たす最小の回数へ補正する。
+ *
+ * @returns target 以降となる最小の繰り越し回数 (0以上)
+ */
+function stepsUntil(anchor: Date, cycle: BillingCycle, target: Date): number {
+  if (anchor.getTime() >= target.getTime()) return 0;
+
+  const meta = CYCLE_META[cycle];
+  const daysPerCycle = meta.days > 0 ? meta.days : meta.months * AVERAGE_DAYS_PER_MONTH;
+  const elapsed = diffInDays(anchor, target);
+
+  // 近似は誤差で行き過ぎる場合があるため、少なめに見積もってから前へ詰める
+  let steps = Math.max(0, Math.floor(elapsed / daysPerCycle) - 1);
+
+  for (let i = 0; i < MAX_ADJUST_STEPS; i++) {
+    if (shiftCycles(anchor, cycle, steps).getTime() >= target.getTime()) break;
+    steps++;
+  }
+  // 行き過ぎていた場合に備えて戻す (最小の回数に揃える)
+  for (let i = 0; i < MAX_ADJUST_STEPS; i++) {
+    if (steps === 0) break;
+    if (shiftCycles(anchor, cycle, steps - 1).getTime() < target.getTime()) break;
+    steps--;
+  }
+
+  return steps;
+}
+
+/**
  * 登録された基準日から、今日以降に到来する実際の次回更新日を算出する。
  * 登録日が過去になっても表示が古くならないよう、周期分だけ繰り越す。
  *
- * @param anchorDate DBに保存されている基準日 (YYYY-MM-DD)
+ * @param anchorDate 保存されている基準日 (YYYY-MM-DD)
  * @param cycle 支払周期
  * @param today 判定基準日 (省略時は本日)
  * @returns 今日以降の次回更新日 (YYYY-MM-DD)
@@ -80,14 +137,7 @@ export function getUpcomingBillingDate(
   // 未来の日付が登録されている場合はそのまま利用する
   if (anchor.getTime() >= today.getTime()) return toDateKey(anchor);
 
-  const monthsPerCycle = cycle === 'yearly' ? 12 : 1;
-
-  for (let step = 1; step <= MAX_SHIFT_STEPS; step++) {
-    const candidate = shiftMonthsFromAnchor(anchor, monthsPerCycle * step);
-    if (candidate.getTime() >= today.getTime()) return toDateKey(candidate);
-  }
-
-  return anchorDate;
+  return toDateKey(shiftCycles(anchor, cycle, stepsUntil(anchor, cycle, today)));
 }
 
 /**
@@ -102,8 +152,7 @@ export function diffInDays(from: Date, to: Date): number {
  * プログレスバーの起点として使う。
  */
 export function getPreviousBillingDate(upcomingDate: string, cycle: BillingCycle): string {
-  const upcoming = parseDateKey(upcomingDate);
-  return toDateKey(shiftMonthsFromAnchor(upcoming, cycle === 'yearly' ? -12 : -1));
+  return toDateKey(shiftCycles(parseDateKey(upcomingDate), cycle, -1));
 }
 
 /**
@@ -129,7 +178,7 @@ export function getCycleProgress(
  * 指定した月に発生する請求日を列挙する。
  *
  * 基準日より前の月には請求が無かったものとして扱い、過去へは遡らない。
- * 解約済みは請求が発生しないため空配列を返す。
+ * 週次のように1ヶ月に複数回発生する周期があるため、配列で返す。
  *
  * @param subscription 対象のサブスクリプション
  * @param year 対象の年
@@ -153,23 +202,20 @@ export function getBillingDatesInMonth(
   // 基準日より前は契約前とみなし、請求を表示しない
   if (monthEnd.getTime() < anchor.getTime()) return [];
 
-  const monthsPerCycle = subscription.cycle === 'yearly' ? 12 : 1;
-  const monthsFromAnchor =
-    (year - anchor.getUTCFullYear()) * 12 + (monthIndex - anchor.getUTCMonth());
+  const cancelledAt = subscription.cancelledAt ? parseDateKey(subscription.cancelledAt) : null;
+  const firstStep = stepsUntil(anchor, subscription.cycle, monthStart);
+  const dates: string[] = [];
 
-  // 年額は基準日と同じ月にしか発生しない
-  if (monthsFromAnchor % monthsPerCycle !== 0) return [];
-
-  const occurrence = shiftMonthsFromAnchor(anchor, monthsFromAnchor);
-  if (occurrence.getTime() < monthStart.getTime()) return [];
-
-  // 解約後は請求が発生しない
-  if (subscription.cancelledAt) {
-    const cancelled = parseDateKey(subscription.cancelledAt);
-    if (occurrence.getTime() > cancelled.getTime()) return [];
+  // 週次でも1ヶ月に5回程度。上限を設けて暴走を防ぐ
+  for (let i = 0; i < MAX_ADJUST_STEPS; i++) {
+    const occurrence = shiftCycles(anchor, subscription.cycle, firstStep + i);
+    if (occurrence.getTime() > monthEnd.getTime()) break;
+    // 解約後は請求が発生しない
+    if (cancelledAt && occurrence.getTime() > cancelledAt.getTime()) break;
+    if (occurrence.getTime() >= monthStart.getTime()) dates.push(toDateKey(occurrence));
   }
 
-  return [toDateKey(occurrence)];
+  return dates;
 }
 
 /**
@@ -236,10 +282,19 @@ export function findTopSpenders(
 }
 
 /**
- * 年額プランを12で割って月額へ換算する (円未満は切り捨て)
+ * どの周期でも月額へ換算する (円未満は切り捨て)。
+ * 「1年あたりの請求回数 ÷ 12」で求めるため、周期を増やしても cycles.ts の定義だけで済む。
  */
 export function getMonthlyEquivalentPrice(price: number, cycle: BillingCycle): number {
-  return cycle === 'yearly' ? Math.floor(price / 12) : price;
+  return Math.floor((price * CYCLE_META[cycle].perYear) / 12);
+}
+
+/**
+ * どの周期でも年額へ換算する (円未満は四捨五入)。
+ * 月額換算を12倍すると端数の切り捨て誤差が積み上がるため、元の金額から直接求める。
+ */
+export function getYearlyEquivalentPrice(price: number, cycle: BillingCycle): number {
+  return Math.round(price * CYCLE_META[cycle].perYear);
 }
 
 /**
@@ -299,7 +354,15 @@ export function calculateMonthlyTotal(subscriptions: Subscription[]): number {
 export function calculateYearlyTotal(subscriptions: Subscription[]): number {
   return subscriptions
     .filter(countsTowardTotal)
-    .reduce((total, sub) => total + (sub.cycle === 'yearly' ? sub.price : sub.price * 12), 0);
+    .reduce((total, sub) => total + getYearlyEquivalentPrice(sub.price, sub.cycle), 0);
+}
+
+/**
+ * 1日あたりの支出を返す (円未満は切り捨て)。
+ * 「月◯円」より実感が湧きやすいため、合計の補足として表示する。
+ */
+export function calculateDailyAverage(subscriptions: Subscription[]): number {
+  return Math.floor(calculateYearlyTotal(subscriptions) / 365);
 }
 
 /**
@@ -331,6 +394,36 @@ export function summarizeByCategory(subscriptions: Subscription[]): CategorySumm
   return Array.from(totals.entries())
     .map(([category, { count, monthlyTotal }]) => ({
       category,
+      count,
+      monthlyTotal,
+      ratio: overallTotal > 0 ? monthlyTotal / overallTotal : 0,
+    }))
+    .sort((a, b) => b.monthlyTotal - a.monthlyTotal);
+}
+
+/**
+ * 支払い方法別に月額換算で集計し、金額の大きい順に並べて返す。
+ *
+ * カードを再発行・解約するときに「何を切り替える必要があるか」を把握するための集計。
+ * 未入力のものは「未設定」としてまとめ、記入漏れが分かるようにする。
+ */
+export function summarizeByPaymentMethod(subscriptions: Subscription[]): PaymentMethodSummary[] {
+  const totals = new Map<string, { count: number; monthlyTotal: number }>();
+
+  for (const sub of subscriptions.filter(countsTowardTotal)) {
+    const method = sub.paymentMethod?.trim() || PAYMENT_METHOD_UNSET;
+    const current = totals.get(method) ?? { count: 0, monthlyTotal: 0 };
+    totals.set(method, {
+      count: current.count + 1,
+      monthlyTotal: current.monthlyTotal + getMonthlyEquivalentPrice(sub.price, sub.cycle),
+    });
+  }
+
+  const overallTotal = calculateMonthlyTotal(subscriptions);
+
+  return Array.from(totals.entries())
+    .map(([method, { count, monthlyTotal }]) => ({
+      method,
       count,
       monthlyTotal,
       ratio: overallTotal > 0 ? monthlyTotal / overallTotal : 0,

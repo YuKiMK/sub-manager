@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { Search, ChevronDown, ChevronUp, X } from "lucide-react";
 import { CATEGORIES, POPULAR_PRESETS, SUBSCRIPTION_PRESETS } from "@/constants/presets";
+import { CYCLE_META } from "@/constants/cycles";
 import { Category, PresetSubscription } from "@/types";
 import { cn, formatJPY } from "@/lib/utils";
 import ServiceIcon from "@/components/ui/ServiceIcon";
@@ -149,7 +150,7 @@ export default function PresetPicker({ selectedName, onSelect }: PresetPickerPro
                         {preset.name}
                       </span>
                       <span className="block text-[10px] text-gray-500">
-                        {formatJPY(preset.price)}/{preset.cycle === "monthly" ? "月" : "年"}
+                        {formatJPY(preset.price)}/{CYCLE_META[preset.cycle].unit}
                       </span>
                     </span>
                   </button>

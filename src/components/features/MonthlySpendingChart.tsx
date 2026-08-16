@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { MonthlySpending, SubscriptionView } from "@/types";
 import { cn, formatJPY } from "@/lib/utils";
 import { getBillingDatesInMonth } from "@/lib/billing";
+import { CYCLE_META } from "@/constants/cycles";
 import ServiceIcon from "@/components/ui/ServiceIcon";
 
 /** 棒の描画領域の高さ (px) */
@@ -173,7 +174,7 @@ export default function MonthlySpendingChart({
               />
               <span className="flex-1 min-w-0 text-sm text-white truncate pr-2">{sub.name}</span>
               <span className="text-[10px] text-gray-500 mr-2 shrink-0">
-                {sub.cycle === "yearly" ? "年払い" : "月払い"}
+                {CYCLE_META[sub.cycle].shortLabel}
               </span>
               <span className="text-sm font-bold text-white tabular-nums shrink-0">
                 {formatJPY(sub.price)}

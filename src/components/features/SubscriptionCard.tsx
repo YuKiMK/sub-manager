@@ -5,6 +5,7 @@ import { SubscriptionView } from "@/types";
 import { cn, formatJPY } from "@/lib/utils";
 import { formatDaysUntil, parseDateKey } from "@/lib/billing";
 import { STATUS_META } from "@/constants/status";
+import { CYCLE_META } from "@/constants/cycles";
 import ServiceIcon from "@/components/ui/ServiceIcon";
 
 /** この日数以内に更新日が迫っている場合は強調表示する */
@@ -99,7 +100,7 @@ export default function SubscriptionCard({ subscription, onClick }: Subscription
             {formatJPY(subscription.price)}
           </span>
           <span className="text-[10px] text-gray-400">
-            /{subscription.cycle === "monthly" ? "月" : "年"}
+            /{CYCLE_META[subscription.cycle].unit}
           </span>
         </div>
 

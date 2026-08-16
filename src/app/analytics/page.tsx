@@ -2,6 +2,7 @@
 
 import { PieChart, PiggyBank } from "lucide-react";
 import CategoryBreakdown from "@/components/features/CategoryBreakdown";
+import PaymentMethodBreakdown from "@/components/features/PaymentMethodBreakdown";
 import UpcomingPayments from "@/components/features/UpcomingPayments";
 import MonthlySpendingChart from "@/components/features/MonthlySpendingChart";
 import TopSpenders from "@/components/features/TopSpenders";
@@ -14,8 +15,10 @@ import {
   calculateYearlyTotal,
   findTopSpenders,
   summarizeByCategory,
+  summarizeByPaymentMethod,
   summarizeMonthlySpending,
 } from "@/lib/billing";
+import { PAYMENT_METHOD_UNSET } from "@/constants/paymentMethods";
 import { useSubscriptions } from "@/components/providers/SubscriptionProvider";
 
 /** 支払い予定の集計対象日数 */
@@ -33,6 +36,11 @@ export default function AnalyticsPage() {
   const yearlyTotal = calculateYearlyTotal(subscriptions);
   const monthlySavings = calculateMonthlySavings(subscriptions);
   const categorySummaries = summarizeByCategory(subscriptions);
+  const paymentSummaries = summarizeByPaymentMethod(subscriptions);
+  // 誰も支払い方法を入れていない場合は「未設定」1件だけになるため、その時は出さない
+  const hasPaymentMethods = paymentSummaries.some(
+    (summary) => summary.method !== PAYMENT_METHOD_UNSET
+  );
   const activeCount = subscriptions.filter((sub) => sub.countsTowardTotal).length;
   const monthlyTrend = summarizeMonthlySpending(subscriptions, TREND_MONTHS);
   const topSpenders = findTopSpenders(subscriptions, TOP_SPENDER_COUNT);
@@ -136,6 +144,22 @@ export default function AnalyticsPage() {
               <div className="bg-[#1a1a1a] rounded-2xl p-5 border border-gray-800/60">
                 <CategoryBreakdown summaries={categorySummaries} />
               </div>
+            </section>
+          )}
+
+          {/* 支払い方法別の内訳 (1件でも入力があるときのみ) */}
+          {hasPaymentMethods && (
+            <section>
+              <div className="flex items-baseline justify-between mb-4 px-1">
+                <h3 className="text-lg font-bold text-white">支払い方法別の月額</h3>
+                <span className="text-[10px] text-gray-500">月額換算</span>
+              </div>
+              <div className="bg-[#1a1a1a] rounded-2xl p-5 border border-gray-800/60">
+                <PaymentMethodBreakdown summaries={paymentSummaries} />
+              </div>
+              <p className="text-[10px] text-gray-600 mt-2.5 px-1 leading-relaxed">
+                ※ カードを再発行・解約するときに、切り替えが必要なものを把握できます
+              </p>
             </section>
           )}
 

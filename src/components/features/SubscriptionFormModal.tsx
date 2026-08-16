@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { X, Check } from "lucide-react";
+import { X, Check, TriangleAlert } from "lucide-react";
 import { CATEGORIES, THEME_COLORS } from "@/constants/presets";
+import { BILLING_CYCLES, CYCLE_META } from "@/constants/cycles";
 import { DATE_LABEL, SELECTABLE_STATUSES, STATUS_META } from "@/constants/status";
 import {
   BillingCycle,
@@ -11,11 +12,12 @@ import {
   Subscription,
   SubscriptionStatus,
 } from "@/types";
-import { cn } from "@/lib/utils";
+import { cn, formatJPY } from "@/lib/utils";
 import { getToday, getUpcomingBillingDate, toDateKey } from "@/lib/billing";
 import { useSubscriptions } from "@/components/providers/SubscriptionProvider";
 import PresetPicker from "./PresetPicker";
 import IconPicker from "./IconPicker";
+import PaymentMethodField from "./PaymentMethodField";
 
 /** フォームの動作モード */
 export type SubscriptionFormMode = "create" | "edit";
@@ -38,7 +40,7 @@ export default function SubscriptionFormModal({
   onClose,
 }: SubscriptionFormModalProps) {
   const isEdit = mode === "edit";
-  const { add, update } = useSubscriptions();
+  const { add, update, subscriptions } = useSubscriptions();
 
   // --- State (編集モードでは既存の値を初期値とする) ---
   const [name, setName] = useState(subscription?.name ?? "");
@@ -46,6 +48,7 @@ export default function SubscriptionFormModal({
   const [cycle, setCycle] = useState<BillingCycle>(subscription?.cycle ?? "monthly");
   const [nextBillingDate, setNextBillingDate] = useState("");
   const [category, setCategory] = useState<Category>(subscription?.category ?? "エンタメ");
+  const [paymentMethod, setPaymentMethod] = useState(subscription?.paymentMethod ?? "");
   const [memo, setMemo] = useState(subscription?.memo ?? "");
   const [color, setColor] = useState(subscription?.color ?? THEME_COLORS[0]);
   const [iconUrl, setIconUrl] = useState<string | undefined>(subscription?.iconUrl);
@@ -78,6 +81,19 @@ export default function SubscriptionFormModal({
     };
   }, []);
 
+  /**
+   * 同じ名前で既に登録されているか。
+   * 「登録したのを忘れて二重に入れる」のは実際に起きるうえ、
+   * 合計金額が黙って倍になるため、登録前に気づけるようにする。
+   * 解約済みは再契約の可能性があるため対象から外す。
+   */
+  const duplicate = subscriptions.find(
+    (item) =>
+      item.id !== subscription?.id &&
+      item.status !== "cancelled" &&
+      item.name.trim().toLowerCase() === name.trim().toLowerCase()
+  );
+
   // --- Handlers ---
   const handlePresetClick = (preset: PresetSubscription) => {
     setSelectedPresetName(preset.name);
@@ -107,6 +123,7 @@ export default function SubscriptionFormModal({
       cycle,
       nextBillingDate,
       category,
+      paymentMethod: paymentMethod.trim() || undefined,
       memo: memo.trim() || undefined,
       color,
       iconUrl,
@@ -186,6 +203,16 @@ export default function SubscriptionFormModal({
                 className="w-full bg-[#151515] border border-gray-700 rounded-xl px-4 py-3.5 text-base text-white focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all"
                 placeholder="例: Spotify"
               />
+              {/* 二重登録の注意。登録自体は妨げない (同名の別プランを持つ場合があるため) */}
+              {duplicate && (
+                <p className="flex items-start space-x-1.5 mt-2 text-[11px] text-amber-300/90">
+                  <TriangleAlert size={13} className="shrink-0 mt-0.5" />
+                  <span>
+                    「{duplicate.name}」は既に登録されています（
+                    {formatJPY(duplicate.price)}/{CYCLE_META[duplicate.cycle].unit}）
+                  </span>
+                </p>
+              )}
             </div>
 
             {/* 料金 & 支払周期 */}
@@ -218,8 +245,11 @@ export default function SubscriptionFormModal({
                   onChange={(e) => setCycle(e.target.value as BillingCycle)}
                   className="w-full bg-[#151515] border border-gray-700 rounded-xl px-4 py-3.5 text-base text-white focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary appearance-none transition-all"
                 >
-                  <option value="monthly">月額</option>
-                  <option value="yearly">年額</option>
+                  {BILLING_CYCLES.map((item) => (
+                    <option key={item} value={item}>
+                      {CYCLE_META[item].label}
+                    </option>
+                  ))}
                 </select>
               </div>
             </div>
@@ -282,6 +312,9 @@ export default function SubscriptionFormModal({
                 ))}
               </select>
             </div>
+
+            {/* 支払い方法 (カード再発行時の洗い出しに使う) */}
+            <PaymentMethodField value={paymentMethod} onChange={setPaymentMethod} />
 
             {/* アイコン画像 (未設定なら頭文字アイコン) */}
             <IconPicker name={name} color={color} iconUrl={iconUrl} onChange={setIconUrl} />

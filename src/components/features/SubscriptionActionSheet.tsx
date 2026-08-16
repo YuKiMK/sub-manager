@@ -1,11 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { Pencil, Trash2, TriangleAlert, CircleCheck, RotateCcw, Ban } from "lucide-react";
+import { Pencil, Trash2, TriangleAlert, CircleCheck, RotateCcw, Ban, CreditCard } from "lucide-react";
 import { SubscriptionStatus, SubscriptionView } from "@/types";
 import { cn, formatJPY } from "@/lib/utils";
 import { useSubscriptions } from "@/components/providers/SubscriptionProvider";
 import { STATUS_META } from "@/constants/status";
+import { CYCLE_META } from "@/constants/cycles";
 import ServiceIcon from "@/components/ui/ServiceIcon";
 
 interface SubscriptionActionSheetProps {
@@ -105,7 +106,7 @@ export default function SubscriptionActionSheet({
             <p className="text-base font-bold text-white truncate">{subscription.name}</p>
             <div className="flex items-center space-x-2 mt-0.5">
               <p className="text-xs text-gray-400">
-                {formatJPY(subscription.price)} / {subscription.cycle === "monthly" ? "月" : "年"}
+                {formatJPY(subscription.price)} / {CYCLE_META[subscription.cycle].unit}
               </p>
               <span
                 className={cn(
@@ -116,6 +117,12 @@ export default function SubscriptionActionSheet({
                 {STATUS_META[subscription.status].label}
               </span>
             </div>
+            {subscription.paymentMethod && (
+              <div className="flex items-center space-x-1.5 mt-1.5 text-gray-500">
+                <CreditCard size={12} className="shrink-0" />
+                <span className="text-[11px] truncate">{subscription.paymentMethod}</span>
+              </div>
+            )}
           </div>
         </div>
 

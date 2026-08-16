@@ -29,6 +29,7 @@ interface SubscriptionRecord {
   category: string;
   status?: string | null;
   cancelledAt?: string | null;
+  paymentMethod?: string | null;
   memo?: string | null;
   color?: string | null;
   iconUrl?: string | null;
@@ -48,6 +49,7 @@ function toSubscription(record: SubscriptionRecord): Subscription {
     // 項目追加前に登録されたデータは status を持たないため利用中として扱う
     status: (record.status as SubscriptionStatus) ?? 'active',
     cancelledAt: record.cancelledAt ?? undefined,
+    paymentMethod: record.paymentMethod ?? undefined,
     memo: record.memo ?? undefined,
     color: record.color ?? undefined,
     iconUrl: record.iconUrl ?? undefined,
@@ -69,6 +71,7 @@ function toRecord(subscription: Subscription): SubscriptionRecord {
     category: subscription.category,
     status: subscription.status,
     cancelledAt: subscription.cancelledAt ?? null,
+    paymentMethod: subscription.paymentMethod ?? null,
     memo: subscription.memo ?? null,
     color: subscription.color ?? null,
     iconUrl: subscription.iconUrl ?? null,

@@ -1,7 +1,14 @@
 /**
  * サブスクリプションの更新周期
+ * 表示名と換算係数は /src/constants/cycles.ts に集約している。
  */
-export type BillingCycle = 'monthly' | 'yearly';
+export type BillingCycle =
+  | 'weekly'
+  | 'monthly'
+  | 'quarterly'
+  | 'semiannual'
+  | 'yearly'
+  | 'biennial';
 
 /**
  * サブスクリプションのカテゴリ
@@ -37,6 +44,11 @@ export interface Subscription {
   status: SubscriptionStatus;
   /** 解約日 (YYYY-MM-DD)。status === 'cancelled' のときのみ持つ */
   cancelledAt?: string;
+  /**
+   * 支払い方法 (例: 楽天カード / PayPay / Apple ID)。
+   * カードを再発行したときに何を切り替える必要があるかを追えるようにするための任意項目。
+   */
+  paymentMethod?: string;
   memo?: string;
   color?: string; // テーマカラー (Hex)
   iconUrl?: string;
@@ -99,6 +111,23 @@ export interface SubscriptionView extends Subscription {
 }
 
 /**
+ * 一覧の並び替え方法
+ * 表示名は /src/constants/sort.ts に集約している。
+ */
+export type SortKey = 'billing' | 'priceDesc' | 'priceAsc' | 'name';
+
+/**
+ * 一覧の絞り込み条件
+ */
+export interface ListFilter {
+  /** サービス名・メモ・支払い方法に対する検索語 */
+  keyword: string;
+  /** 'all' は絞り込みなし */
+  category: Category | 'all';
+  sort: SortKey;
+}
+
+/**
  * ホーム上部に出すお知らせ
  */
 export interface HomeAlert {
@@ -137,5 +166,17 @@ export interface CategorySummary {
   /** 月額換算の合計金額 (円) */
   monthlyTotal: number;
   /** 全体に占める割合 (0〜1) */
+  ratio: number;
+}
+
+/**
+ * 支払い方法別の集計結果
+ * 「このカードで月いくら払っているか」を把握するために使う。
+ */
+export interface PaymentMethodSummary {
+  /** 未入力のものは「未設定」としてまとめる */
+  method: string;
+  count: number;
+  monthlyTotal: number;
   ratio: number;
 }

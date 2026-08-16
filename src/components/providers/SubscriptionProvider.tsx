@@ -25,6 +25,8 @@ import {
   updateSubscription,
 } from "@/lib/subscriptionService";
 import { LocalStorageUnavailableError } from "@/lib/localDb";
+import { requestPersistentStorage } from "@/lib/storagePersistence";
+import { hasRequestedPersistence, markPersistenceRequested } from "@/lib/appPreferences";
 import {
   ActionResult,
   ImportActionResult,
@@ -87,6 +89,16 @@ export default function SubscriptionProvider({ children }: { children: React.Rea
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // 登録が1件でもあれば、ブラウザの自動削除からデータを守るよう要求する。
+  // 守る対象が無いうちに確認を出しても意味が無いため、データができてから1度だけ行う。
+  useEffect(() => {
+    if (isLoading || subscriptions.length === 0) return;
+    if (hasRequestedPersistence()) return;
+
+    markPersistenceRequested();
+    void requestPersistentStorage();
+  }, [isLoading, subscriptions.length]);
 
   // 日付が変わると「あとN日」や繰り越し後の請求日がずれるため、
   // アプリに戻ってきたタイミングで計算し直す (PWAは閉じずに翌日開かれることが多い)

@@ -4,9 +4,12 @@ import { useState } from "react";
 import { Download } from "lucide-react";
 import { Subscription, SubscriptionView } from "@/types";
 import { getToday, toDateKey } from "@/lib/billing";
+import { markExported } from "@/lib/appPreferences";
 
 interface DataExportButtonProps {
   subscriptions: SubscriptionView[];
+  /** 書き出しが完了したときの通知 (最終バックアップ日の表示を更新するために使う) */
+  onExported?: () => void;
 }
 
 /**
@@ -15,7 +18,10 @@ interface DataExportButtonProps {
  * 機種変更・ブラウザのデータ削除に備えたバックアップ手段として提供する。
  * 別の端末へデータを移す唯一の経路でもある。
  */
-export default function DataExportButton({ subscriptions }: DataExportButtonProps) {
+export default function DataExportButton({
+  subscriptions,
+  onExported,
+}: DataExportButtonProps) {
   const [message, setMessage] = useState<string | null>(null);
 
   const handleExport = () => {
@@ -29,6 +35,7 @@ export default function DataExportButton({ subscriptions }: DataExportButtonProp
       category: sub.category,
       status: sub.status,
       cancelledAt: sub.cancelledAt,
+      paymentMethod: sub.paymentMethod,
       memo: sub.memo,
       color: sub.color,
       iconUrl: sub.iconUrl,
@@ -50,6 +57,10 @@ export default function DataExportButton({ subscriptions }: DataExportButtonProp
     link.download = `subscriptions-${toDateKey(getToday())}.json`;
     link.click();
     URL.revokeObjectURL(url);
+
+    // 次回以降「そろそろバックアップを」と促すかの判断に使う
+    markExported();
+    onExported?.();
 
     setMessage(`${records.length}件を書き出しました`);
   };

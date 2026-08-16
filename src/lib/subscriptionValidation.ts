@@ -4,10 +4,9 @@
  * 保存する前にこのモジュールで必ず検証・正規化を行う。
  */
 import { CATEGORIES } from '@/constants/presets';
-import { BillingCycle, SubscriptionInput, SubscriptionStatus } from '@/types';
-
-/** 許可する支払周期 */
-const BILLING_CYCLES: readonly BillingCycle[] = ['monthly', 'yearly'];
+import { BILLING_CYCLES } from '@/constants/cycles';
+import { PAYMENT_METHOD_MAX_LENGTH } from '@/constants/paymentMethods';
+import { SubscriptionInput, SubscriptionStatus } from '@/types';
 
 /** 許可する契約状態 */
 const STATUSES: readonly SubscriptionStatus[] = ['active', 'trial', 'scheduled', 'cancelled'];
@@ -117,6 +116,16 @@ export function validateSubscriptionInput(input: SubscriptionInput): ValidationR
   }
   const cancelledAt = status === 'cancelled' ? rawCancelledAt || undefined : undefined;
 
+  // --- 支払い方法 (任意) ---
+  const paymentMethod =
+    typeof input.paymentMethod === 'string' ? input.paymentMethod.trim() : '';
+  if (paymentMethod.length > PAYMENT_METHOD_MAX_LENGTH) {
+    return {
+      ok: false,
+      error: `支払い方法は${PAYMENT_METHOD_MAX_LENGTH}文字以内で入力してください。`,
+    };
+  }
+
   // --- メモ (任意) ---
   const memo = typeof input.memo === 'string' ? input.memo.trim() : '';
   if (memo.length > MEMO_MAX_LENGTH) {
@@ -150,6 +159,7 @@ export function validateSubscriptionInput(input: SubscriptionInput): ValidationR
       category: input.category,
       status,
       cancelledAt,
+      paymentMethod: paymentMethod || undefined,
       memo: memo || undefined,
       color: color || undefined,
       iconUrl: iconUrl || undefined,

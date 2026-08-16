@@ -1,17 +1,43 @@
 "use client";
 
+import { useCallback, useEffect, useState } from "react";
 import { Database, JapaneseYen, Layers, Wallet } from "lucide-react";
 import DataExportButton from "@/components/features/DataExportButton";
 import DataImportButton from "@/components/features/DataImportButton";
+import StoragePanel from "@/components/features/StoragePanel";
 import LoadingPanel from "@/components/ui/LoadingPanel";
 import ErrorPanel from "@/components/ui/ErrorPanel";
-import { formatJPY } from "@/lib/utils";
+import { cn, formatJPY } from "@/lib/utils";
 import { calculateMonthlyTotal } from "@/lib/billing";
+import { BACKUP_REMINDER_DAYS, daysSinceLastExport } from "@/lib/appPreferences";
 import { useSubscriptions } from "@/components/providers/SubscriptionProvider";
+
+/** 最終バックアップの経過日数を文言にする */
+function describeLastBackup(days: number | null): { text: string; stale: boolean } {
+  if (days === null) return { text: "まだ書き出していません", stale: true };
+  if (days <= 0) return { text: "本日", stale: false };
+  if (days === 1) return { text: "昨日", stale: false };
+  return { text: `${days}日前`, stale: days >= BACKUP_REMINDER_DAYS };
+}
 
 export default function SettingsPage() {
   const { subscriptions, isLoading, loadError } = useSubscriptions();
   const monthlyTotal = calculateMonthlyTotal(subscriptions);
+
+  // localStorage は描画時には読めないため、表示後に読み込む
+  const [backupDays, setBackupDays] = useState<number | null>(null);
+  const [backupChecked, setBackupChecked] = useState(false);
+
+  const reloadBackupState = useCallback(() => {
+    setBackupDays(daysSinceLastExport());
+    setBackupChecked(true);
+  }, []);
+
+  useEffect(() => {
+    reloadBackupState();
+  }, [reloadBackupState]);
+
+  const backup = describeLastBackup(backupDays);
 
   /** アプリの基本情報 (仕様として固定されている項目) */
   const appInfo = [
@@ -33,6 +59,12 @@ export default function SettingsPage() {
         <LoadingPanel />
       ) : (
         <>
+          {/* 保存領域の保護状態 */}
+          <section>
+            <h3 className="text-lg font-bold text-white mb-4 px-1">保存データの保護</h3>
+            <StoragePanel />
+          </section>
+
           {/* データのバックアップ */}
           <section>
             <h3 className="text-lg font-bold text-white mb-4 px-1">データ管理</h3>
@@ -41,7 +73,23 @@ export default function SettingsPage() {
                 登録データはこの端末のブラウザ内にのみ保存されます。
                 機種変更やブラウザのデータ削除で失われるため、定期的にファイルへ書き出しておくことを推奨します。
               </p>
-              <DataExportButton subscriptions={subscriptions} />
+
+              {/* 最後にいつ備えたかが分からないと「そろそろ書き出す」判断ができない */}
+              {backupChecked && (
+                <div className="flex items-center justify-between px-1">
+                  <span className="text-xs text-gray-500">最後の書き出し</span>
+                  <span
+                    className={cn(
+                      "text-xs font-medium",
+                      backup.stale ? "text-amber-400" : "text-gray-300"
+                    )}
+                  >
+                    {backup.text}
+                  </span>
+                </div>
+              )}
+
+              <DataExportButton subscriptions={subscriptions} onExported={reloadBackupState} />
               <DataImportButton />
               <p className="text-[11px] text-gray-600 leading-relaxed">
                 読み込みは既存データを消さずに追加します（同じ項目は上書き）。
