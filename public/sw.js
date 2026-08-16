@@ -10,7 +10,7 @@
  *
  * キャッシュの中身を変えたら VERSION を上げること (activate時に旧版を削除する)。
  */
-const VERSION = "v2";
+const VERSION = "v3";
 const STATIC_CACHE = `submanager-static-${VERSION}`;
 const PAGE_CACHE = `submanager-pages-${VERSION}`;
 

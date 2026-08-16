@@ -1,10 +1,20 @@
 // PWA用アイコンPNGを生成する (依存パッケージなし: zlibのみ)
-// モチーフ: 「繰り返し課金される円」= 円記号 + 周回する矢印
+// モチーフ: 重なったカード = 複数の契約をまとめている状態。前面のカードから円記号をくり抜く。
 const zlib = require("zlib");
 const fs = require("fs");
 const path = require("path");
 
 const OUT_DIR = path.resolve(process.cwd(), "public", "icons");
+
+/** 背景のグラデーション (アプリのテーマ色に合わせた紫) */
+const GRADIENT_FROM = "#a78bfa";
+const GRADIENT_TO = "#4c1d95";
+
+/**
+ * maskable用のセーフゾーン半径 (512基準)。
+ * Androidはアイコンを円形などに切り抜くため、図形は中央80%に収める必要がある。
+ */
+const SAFE_RADIUS = 204;
 
 // ---------------- PNGエンコーダ ----------------
 const CRC_TABLE = (() => {
@@ -36,8 +46,8 @@ function encodePng(size, rgba) {
   const ihdr = Buffer.alloc(13);
   ihdr.writeUInt32BE(size, 0);
   ihdr.writeUInt32BE(size, 4);
-  ihdr[8] = 8;  // bit depth
-  ihdr[9] = 6;  // color type: RGBA
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 6; // color type: RGBA
   const raw = Buffer.alloc((size * 4 + 1) * size);
   for (let y = 0; y < size; y++) {
     raw[y * (size * 4 + 1)] = 0; // filter: none
@@ -52,26 +62,32 @@ function encodePng(size, rgba) {
 }
 
 // ---------------- 描画基盤 ----------------
-/** 3x3のスーパーサンプリングで縁を滑らかにする */
-const SS = 3;
+/** 4x4のスーパーサンプリングで縁を滑らかにする */
+const SS = 4;
 const hex = (h) => [
   parseInt(h.slice(1, 3), 16),
   parseInt(h.slice(3, 5), 16),
   parseInt(h.slice(5, 7), 16),
 ];
 
-function createCanvas(size, topColor, bottomColor) {
+/**
+ * 斜めの線形グラデーションに、左上からの柔らかい光沢を重ねた背景を作る。
+ * 単色や単純なグラデーションだと平坦に見えるため、奥行きを足している。
+ */
+function createBackground(size) {
   const buf = Buffer.alloc(size * size * 4);
-  const [r1, g1, b1] = hex(topColor);
-  const [r2, g2, b2] = hex(bottomColor);
+  const [r1, g1, b1] = hex(GRADIENT_FROM);
+  const [r2, g2, b2] = hex(GRADIENT_TO);
+
   for (let y = 0; y < size; y++) {
-    // 斜めのグラデーションにして単調さを避ける
     for (let x = 0; x < size; x++) {
-      const t = (y / (size - 1)) * 0.75 + (x / (size - 1)) * 0.25;
+      const t = Math.min(1, (x / (size - 1)) * 0.45 + (y / (size - 1)) * 0.55);
+      const distance = Math.hypot(x - size * 0.22, y - size * 0.16) / (size * 0.95);
+      const gloss = Math.max(0, 1 - distance) ** 2 * 0.18;
       const i = (y * size + x) * 4;
-      buf[i] = Math.round(r1 + (r2 - r1) * t);
-      buf[i + 1] = Math.round(g1 + (g2 - g1) * t);
-      buf[i + 2] = Math.round(b1 + (b2 - b1) * t);
+      buf[i] = Math.round((r1 + (r2 - r1) * t) * (1 - gloss) + 255 * gloss);
+      buf[i + 1] = Math.round((g1 + (g2 - g1) * t) * (1 - gloss) + 255 * gloss);
+      buf[i + 2] = Math.round((b1 + (b2 - b1) * t) * (1 - gloss) + 255 * gloss);
       buf[i + 3] = 255;
     }
   }
@@ -79,11 +95,15 @@ function createCanvas(size, topColor, bottomColor) {
 }
 
 /**
- * 各ピクセルを覆っているかを判定する関数を受け取り、色を合成する。
- * @param inside (x, y) => boolean  サブピクセル座標が図形の内側か
+ * 各サブピクセルが図形の内側かを判定して色を合成する。
+ *
+ * @param color "#rrggbb"。`{ source: Buffer }` を渡すと、その画像の同じ位置の色で塗る
+ *              (白いカードから円記号をくり抜き、背景を覗かせるために使う)
+ * @param inside (x, y) => boolean
  */
 function paint(buf, size, color, alpha, bounds, inside) {
-  const [r, g, b] = hex(color);
+  const fromSource = typeof color === "object";
+  const rgb = fromSource ? null : hex(color);
   const x0 = Math.max(0, Math.floor(bounds.x0));
   const x1 = Math.min(size, Math.ceil(bounds.x1));
   const y0 = Math.max(0, Math.floor(bounds.y0));
@@ -98,8 +118,12 @@ function paint(buf, size, color, alpha, bounds, inside) {
         }
       }
       if (!hits) continue;
+
       const a = (hits / (SS * SS)) * alpha;
       const i = (py * size + px) * 4;
+      const [r, g, b] = fromSource
+        ? [color.source[i], color.source[i + 1], color.source[i + 2]]
+        : rgb;
       buf[i] = Math.round(buf[i] * (1 - a) + r * a);
       buf[i + 1] = Math.round(buf[i + 1] * (1 - a) + g * a);
       buf[i + 2] = Math.round(buf[i + 2] * (1 - a) + b * a);
@@ -107,165 +131,162 @@ function paint(buf, size, color, alpha, bounds, inside) {
   }
 }
 
-/** 太さのある線分 (両端は丸) */
-function strokeLine(buf, size, x1, y1, x2, y2, width, color, alpha = 1) {
-  const half = width / 2;
-  const dx = x2 - x1;
-  const dy = y2 - y1;
-  const lenSq = dx * dx + dy * dy || 1;
-
-  paint(
-    buf, size, color, alpha,
-    {
-      x0: Math.min(x1, x2) - half - 1, x1: Math.max(x1, x2) + half + 1,
-      y0: Math.min(y1, y2) - half - 1, y1: Math.max(y1, y2) + half + 1,
-    },
-    (px, py) => {
-      // 線分への最短距離
-      let t = ((px - x1) * dx + (py - y1) * dy) / lenSq;
-      t = Math.max(0, Math.min(1, t));
-      const cx = x1 + t * dx;
-      const cy = y1 + t * dy;
-      return (px - cx) ** 2 + (py - cy) ** 2 <= half * half;
-    }
-  );
+/** 太さのある線分の集合に触れているか (両端は丸) */
+function nearSegments(px, py, segments) {
+  for (const s of segments) {
+    const dx = s.x2 - s.x1;
+    const dy = s.y2 - s.y1;
+    const lengthSq = dx * dx + dy * dy || 1;
+    let t = ((px - s.x1) * dx + (py - s.y1) * dy) / lengthSq;
+    t = Math.max(0, Math.min(1, t));
+    const qx = s.x1 + t * dx - px;
+    const qy = s.y1 + t * dy - py;
+    if (qx * qx + qy * qy <= (s.w / 2) ** 2) return true;
+  }
+  return false;
 }
 
-/** 円弧 (角度は度、時計回りではなく数学的な向き) */
-function strokeArc(buf, size, cx, cy, radius, thickness, startDeg, endDeg, color, alpha = 1) {
-  const inner = radius - thickness / 2;
-  const outer = radius + thickness / 2;
-  const start = (startDeg * Math.PI) / 180;
-  const end = (endDeg * Math.PI) / 180;
-
-  paint(
-    buf, size, color, alpha,
-    { x0: cx - outer - 1, x1: cx + outer + 1, y0: cy - outer - 1, y1: cy + outer + 1 },
-    (px, py) => {
-      const dx = px - cx;
-      const dy = py - cy;
-      const dist = Math.hypot(dx, dy);
-      if (dist < inner || dist > outer) return false;
-
-      let angle = Math.atan2(dy, dx);
-      // start..end の範囲へ正規化して判定する
-      let a = angle - start;
-      while (a < 0) a += Math.PI * 2;
-      let span = end - start;
-      while (span < 0) span += Math.PI * 2;
-      return a <= span;
-    }
-  );
-}
-
-/** 三角形 (矢印の先端に使う) */
-function fillTriangle(buf, size, points, color, alpha = 1) {
-  const [ax, ay, bx, by, cx, cy] = points;
-  const sign = (x1, y1, x2, y2, x3, y3) => (x1 - x3) * (y2 - y3) - (x2 - x3) * (y1 - y3);
-
-  paint(
-    buf, size, color, alpha,
-    {
-      x0: Math.min(ax, bx, cx) - 1, x1: Math.max(ax, bx, cx) + 1,
-      y0: Math.min(ay, by, cy) - 1, y1: Math.max(ay, by, cy) + 1,
-    },
-    (px, py) => {
-      const d1 = sign(px, py, ax, ay, bx, by);
-      const d2 = sign(px, py, bx, by, cx, cy);
-      const d3 = sign(px, py, cx, cy, ax, ay);
-      const hasNeg = d1 < 0 || d2 < 0 || d3 < 0;
-      const hasPos = d1 > 0 || d2 > 0 || d3 > 0;
-      return !(hasNeg && hasPos);
-    }
-  );
+function segmentBounds(segments) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const s of segments) {
+    x0 = Math.min(x0, s.x1 - s.w, s.x2 - s.w);
+    x1 = Math.max(x1, s.x1 + s.w, s.x2 + s.w);
+    y0 = Math.min(y0, s.y1 - s.w, s.y2 - s.w);
+    y1 = Math.max(y1, s.y1 + s.w, s.y2 + s.w);
+  }
+  return { x0: x0 - 1, y0: y0 - 1, x1: x1 + 1, y1: y1 + 1 };
 }
 
 /**
- * 円記号 (¥) を描く。
- * 上部のV字 + 縦棒 + 2本の横棒 という字形をそのまま線分で構成する。
+ * 円記号(¥)を構成する線分を返す。
+ * 上部のV字・縦棒・横棒2本。比率は一般的な字形に合わせてある。
  */
-function drawYen(buf, size, cx, cy, capHeight, stroke, color) {
+function yenSegments(cx, cy, capHeight, stroke) {
   const top = cy - capHeight / 2;
   const bottom = cy + capHeight / 2;
-  const junction = top + capHeight * 0.44; // V字が交わる位置
-  const armSpread = capHeight * 0.36;
-  const barHalf = capHeight * 0.32;
+  const junction = top + capHeight * 0.46; // V字が交わる高さ
+  const spread = capHeight * 0.34;         // V字の開き (片側)
+  const barHalf = capHeight * 0.3;         // 横棒の長さ (片側)
+  const thin = stroke * 0.88;              // 横棒は少し細くして重く見せない
 
-  // V字
-  strokeLine(buf, size, cx - armSpread, top, cx, junction, stroke, color);
-  strokeLine(buf, size, cx + armSpread, top, cx, junction, stroke, color);
-  // 縦棒
-  strokeLine(buf, size, cx, junction, cx, bottom, stroke, color);
-  // 横棒2本
-  strokeLine(buf, size, cx - barHalf, junction + capHeight * 0.16, cx + barHalf, junction + capHeight * 0.16, stroke, color);
-  strokeLine(buf, size, cx - barHalf, junction + capHeight * 0.34, cx + barHalf, junction + capHeight * 0.34, stroke, color);
+  return [
+    { x1: cx - spread, y1: top, x2: cx, y2: junction, w: stroke },
+    { x1: cx + spread, y1: top, x2: cx, y2: junction, w: stroke },
+    { x1: cx, y1: junction, x2: cx, y2: bottom, w: stroke },
+    { x1: cx - barHalf, y1: junction + capHeight * 0.15, x2: cx + barHalf, y2: junction + capHeight * 0.15, w: thin },
+    { x1: cx - barHalf, y1: junction + capHeight * 0.32, x2: cx + barHalf, y2: junction + capHeight * 0.32, w: thin },
+  ];
+}
+
+function drawYen(buf, size, color, cx, cy, capHeight, stroke) {
+  const segments = yenSegments(cx, cy, capHeight, stroke);
+  paint(buf, size, color, 1, segmentBounds(segments), (px, py) => nearSegments(px, py, segments));
+}
+
+/** 角丸長方形 (中心・傾き指定) */
+function fillRoundedBox(buf, size, color, alpha, cx, cy, w, h, radius, angleDeg) {
+  const angle = (-angleDeg * Math.PI) / 180;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  const reach = Math.hypot(w, h) / 2 + 2;
+
+  paint(
+    buf, size, color, alpha,
+    { x0: cx - reach, x1: cx + reach, y0: cy - reach, y1: cy + reach },
+    (px, py) => {
+      // 判定を楽にするため、座標側を逆回転させて軸に揃える
+      const dx = px - cx;
+      const dy = py - cy;
+      const rx = dx * cos - dy * sin;
+      const ry = dx * sin + dy * cos;
+      const qx = Math.abs(rx) - (w / 2 - radius);
+      const qy = Math.abs(ry) - (h / 2 - radius);
+      return Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - radius <= 0;
+    }
+  );
+}
+
+// ---------------- アイコン本体 ----------------
+/** カード1枚あたりの寸法 (512基準) */
+const CARD = { w: 206, h: 262, radius: 32 };
+
+/**
+ * 重なったカードの配置。
+ * 奥のカードほど薄く、少しずつ傾けて重なりを表す。
+ */
+const CARD_LAYERS = [
+  { dx: 31, dy: -23, angle: 14, alpha: 0.22 },
+  { dx: 16, dy: -12, angle: 7, alpha: 0.38 },
+  { dx: -6, dy: 6, angle: 0, alpha: 1 },
+];
+
+/**
+ * 図形がセーフゾーンに収まるかを検算する。
+ * カードの角(丸めた後の最遠点)が中心からどれだけ離れるかで判定する。
+ */
+function maxContentRadius() {
+  const cornerX = CARD.w / 2 - CARD.radius;
+  const cornerY = CARD.h / 2 - CARD.radius;
+  const fromCardCenter = Math.hypot(cornerX, cornerY) + CARD.radius;
+  return Math.max(...CARD_LAYERS.map((l) => Math.hypot(l.dx, l.dy) + fromCardCenter));
 }
 
 /**
- * アイコン本体。
- * maskable対応のため、図形は中央80%のセーフゾーン内に収める。
+ * アイコンを描く。
  *
  * @param size 出力サイズ
- * @param withRing 周回する矢印を描くか (小サイズでは省いて視認性を優先)
+ * @param simplified 小サイズ用。カードを省き円記号だけにする
+ *                   (32px ではカードの縁とくり抜きが潰れて読めなくなるため)
  */
-function drawIcon(size, withRing) {
+function drawIcon(size, simplified) {
   const u = size / 512; // 512基準の座標系
-  const buf = createCanvas(size, "#a78bfa", "#5b21b6");
+  const background = createBackground(size);
+  const buf = Buffer.from(background);
   const cx = size / 2;
   const cy = size / 2;
-  const white = "#ffffff";
 
-  if (withRing) {
-    // maskableのセーフゾーン(中央80% = 半径204/512)に矢印の角まで収める
-    const radius = 176 * u;
-    const thickness = 20 * u;
-    const startDeg = 300;
-    const endDeg = 240; // 上部に60度の隙間を残し、そこへ矢印を向ける
+  if (simplified) {
+    drawYen(buf, size, "#ffffff", cx, cy, 268 * u, 40 * u);
+    return encodePng(size, buf);
+  }
 
-    // 周回を表す円弧 (画面座標なので角度が増える向き = 時計回り)
-    strokeArc(buf, size, cx, cy, radius, thickness, startDeg, endDeg, white, 0.95);
-
-    // 円弧の終端に接する矢印。進行方向(接線)へ尖らせて輪が閉じるように見せる
-    const end = (endDeg * Math.PI) / 180;
-    const radial = { x: Math.cos(end), y: Math.sin(end) };
-    const tangent = { x: -Math.sin(end), y: Math.cos(end) };
-    const headLength = 52 * u;
-    const headHalfWidth = 27 * u;
-
-    fillTriangle(
-      buf, size,
-      [
-        // 先端
-        cx + radial.x * radius + tangent.x * headLength,
-        cy + radial.y * radius + tangent.y * headLength,
-        // 外側の角
-        cx + radial.x * (radius + headHalfWidth),
-        cy + radial.y * (radius + headHalfWidth),
-        // 内側の角
-        cx + radial.x * (radius - headHalfWidth),
-        cy + radial.y * (radius - headHalfWidth),
-      ],
-      white, 0.95
+  for (const layer of CARD_LAYERS) {
+    fillRoundedBox(
+      buf, size, "#ffffff", layer.alpha,
+      cx + layer.dx * u, cy + layer.dy * u,
+      CARD.w * u, CARD.h * u, CARD.radius * u, layer.angle
     );
   }
 
-  drawYen(buf, size, cx, cy, withRing ? 196 * u : 300 * u, (withRing ? 30 : 44) * u, white);
+  // 前面のカードからくり抜く。背景の色をそのまま拾うため、下の紫が覗いて見える
+  const front = CARD_LAYERS[CARD_LAYERS.length - 1];
+  drawYen(
+    buf, size, { source: background },
+    cx + front.dx * u, cy + front.dy * u,
+    139 * u, 23 * u
+  );
 
   return encodePng(size, buf);
 }
 
 fs.mkdirSync(OUT_DIR, { recursive: true });
 
+const contentRadius = maxContentRadius();
+if (contentRadius > SAFE_RADIUS) {
+  console.error(`セーフゾーン超過: ${contentRadius.toFixed(1)} > ${SAFE_RADIUS}`);
+  process.exit(1);
+}
+console.log(`セーフゾーン: ${contentRadius.toFixed(1)} / ${SAFE_RADIUS} (余裕 ${(SAFE_RADIUS - contentRadius).toFixed(1)})`);
+
 const targets = [
-  { size: 512, withRing: true, name: "icon-512.png" },
-  { size: 192, withRing: true, name: "icon-192.png" },
-  { size: 180, withRing: true, name: "apple-icon.png" },
-  // 32pxでは円弧が潰れるため、円記号だけにして輪郭を保つ
-  { size: 32, withRing: false, name: "favicon-32.png" },
+  { size: 512, simplified: false, name: "icon-512.png" },
+  { size: 192, simplified: false, name: "icon-192.png" },
+  { size: 180, simplified: false, name: "apple-icon.png" },
+  { size: 32, simplified: true, name: "favicon-32.png" },
 ];
 
-for (const { size, withRing, name } of targets) {
+for (const { size, simplified, name } of targets) {
   const file = path.join(OUT_DIR, name);
-  fs.writeFileSync(file, drawIcon(size, withRing));
+  fs.writeFileSync(file, drawIcon(size, simplified));
   console.log(`生成: ${name} (${size}px, ${fs.statSync(file).size} bytes)`);
 }
