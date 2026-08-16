@@ -39,6 +39,9 @@ export default function MonthlySpendingChart({
     return steps.find((step) => step >= maxTotal) ?? Math.ceil(maxTotal / 100000) * 100000;
   }, [maxTotal]);
 
+  /** 基準線を引くか (0円や目盛りの上限を超える場合は引かない) */
+  const showAverageLine = averageMonthly > 0 && averageMonthly <= axisMax;
+
   const selected = months[selectedIndex];
   const peakIndex = months.reduce(
     (best, month, index) => (month.total > months[best].total ? index : best),
@@ -78,21 +81,10 @@ export default function MonthlySpendingChart({
         <div className="absolute inset-x-0 top-0 border-t border-gray-800" />
         <div className="absolute inset-x-0 top-1/2 border-t border-gray-800/60" />
         <div className="absolute inset-x-0 bottom-0 border-t border-gray-700" />
-        <span className="absolute right-0 -top-0.5 text-[9px] text-gray-600 tabular-nums bg-[#1a1a1a] pl-1">
+        {/* 目盛りの値は棒に重ならないよう、描画領域の外(上)へ出す */}
+        <span className="absolute right-0 bottom-full mb-0.5 text-[9px] text-gray-600 tabular-nums">
           {axisMax.toLocaleString("ja-JP")}
         </span>
-
-        {/* 均した月額の基準線。年払いの山が「ならすといくらか」を同じ図の中で示す */}
-        {averageMonthly > 0 && averageMonthly <= axisMax && (
-          <div
-            className="absolute inset-x-0 border-t border-primary/45 pointer-events-none"
-            style={{ bottom: `${(averageMonthly / axisMax) * 100}%` }}
-          >
-            <span className="absolute left-0 -top-3.5 text-[9px] text-primary/80 tabular-nums bg-[#1a1a1a] pr-1">
-              均すと {averageMonthly.toLocaleString("ja-JP")}
-            </span>
-          </div>
-        )}
 
         {/* 棒 (タップ領域は列全体にとり、指で押しやすくする) */}
         <div className="absolute inset-0 flex items-end">
@@ -124,6 +116,18 @@ export default function MonthlySpendingChart({
             );
           })}
         </div>
+
+        {/*
+          均した月額の基準線。年払いの山が「ならすといくらか」を同じ図の中で示す。
+          どの月が平均を超えるか読めるよう棒の上に重ねるが、
+          金額は棒を隠してしまうためグラフの外(下の凡例)に出す。
+        */}
+        {showAverageLine && (
+          <div
+            className="absolute inset-x-0 border-t border-dashed border-primary/70 pointer-events-none"
+            style={{ bottom: `${(averageMonthly / axisMax) * 100}%` }}
+          />
+        )}
       </div>
 
       {/* 月ラベル */}
@@ -144,6 +148,16 @@ export default function MonthlySpendingChart({
           </span>
         ))}
       </div>
+
+      {/* 基準線の凡例。線が何を表すかを、棒を隠さない位置で示す */}
+      {showAverageLine && (
+        <div className="flex items-center justify-center space-x-2 mt-3">
+          <span className="w-5 border-t border-dashed border-primary/70 shrink-0" />
+          <span className="text-[10px] text-gray-500 tabular-nums">
+            均すと 月 {formatJPY(averageMonthly)}
+          </span>
+        </div>
+      )}
 
       {/* 最も高い月への注意喚起 (全ての棒に数値を置くと読めなくなるため1点だけ) */}
       {months[peakIndex].total > 0 && peakIndex !== selectedIndex && (
