@@ -160,26 +160,33 @@ function segmentBounds(segments) {
 /**
  * 円記号(¥)を構成する線分を返す。
  * 上部のV字・縦棒・横棒2本。比率は一般的な字形に合わせてある。
+ *
+ * @param option 横棒の位置と太さの調整。小サイズでは2本の横棒が繋がって
+ *               1本に見えてしまうため、間隔を広げて細くする用途で使う。
  */
-function yenSegments(cx, cy, capHeight, stroke) {
+function yenSegments(cx, cy, capHeight, stroke, option = {}) {
+  const bar1 = option.bar1 ?? 0.15;
+  const bar2 = option.bar2 ?? 0.32;
+  const barRatio = option.barRatio ?? 0.88; // 横棒は少し細くして重く見せない
+
   const top = cy - capHeight / 2;
   const bottom = cy + capHeight / 2;
   const junction = top + capHeight * 0.46; // V字が交わる高さ
   const spread = capHeight * 0.34;         // V字の開き (片側)
   const barHalf = capHeight * 0.3;         // 横棒の長さ (片側)
-  const thin = stroke * 0.88;              // 横棒は少し細くして重く見せない
+  const thin = stroke * barRatio;
 
   return [
     { x1: cx - spread, y1: top, x2: cx, y2: junction, w: stroke },
     { x1: cx + spread, y1: top, x2: cx, y2: junction, w: stroke },
     { x1: cx, y1: junction, x2: cx, y2: bottom, w: stroke },
-    { x1: cx - barHalf, y1: junction + capHeight * 0.15, x2: cx + barHalf, y2: junction + capHeight * 0.15, w: thin },
-    { x1: cx - barHalf, y1: junction + capHeight * 0.32, x2: cx + barHalf, y2: junction + capHeight * 0.32, w: thin },
+    { x1: cx - barHalf, y1: junction + capHeight * bar1, x2: cx + barHalf, y2: junction + capHeight * bar1, w: thin },
+    { x1: cx - barHalf, y1: junction + capHeight * bar2, x2: cx + barHalf, y2: junction + capHeight * bar2, w: thin },
   ];
 }
 
-function drawYen(buf, size, color, cx, cy, capHeight, stroke) {
-  const segments = yenSegments(cx, cy, capHeight, stroke);
+function drawYen(buf, size, color, cx, cy, capHeight, stroke, option) {
+  const segments = yenSegments(cx, cy, capHeight, stroke, option);
   paint(buf, size, color, 1, segmentBounds(segments), (px, py) => nearSegments(px, py, segments));
 }
 
@@ -221,7 +228,24 @@ const CARD_LAYERS = [
 ];
 
 /**
- * 図形がセーフゾーンに収まるかを検算する。
+ * 32px 用の配置。
+ *
+ * 標準の配置をそのまま縮小すると、カードの重なりも円記号のくり抜きも潰れて
+ * 判別できなくなる。そこでカードを2枚に減らして大きく取り、
+ * 間に背景色の隙間を挟んで「2枚ある」ことを分からせる。
+ *
+ * ファビコンは切り抜かれないため、セーフゾーンの制約は受けない。
+ */
+const COMPACT = {
+  back: { dx: 40, dy: -34, w: 244, h: 300, radius: 38, alpha: 0.5 },
+  // 前面カードの下に敷く背景色の板。これが2枚のあいだの隙間になる
+  gap: { dx: -6, dy: 4, w: 268, h: 324, radius: 46 },
+  front: { dx: -18, dy: 16, w: 244, h: 300, radius: 38 },
+  yen: { capHeight: 196, stroke: 38, bar1: 0.12, bar2: 0.38, barRatio: 0.78 },
+};
+
+/**
+ * 標準の配置がセーフゾーンに収まるかを検算する。
  * カードの角(丸めた後の最遠点)が中心からどれだけ離れるかで判定する。
  */
 function maxContentRadius() {
@@ -235,27 +259,35 @@ function maxContentRadius() {
  * アイコンを描く。
  *
  * @param size 出力サイズ
- * @param simplified 小サイズ用。カードを省き円記号だけにする
- *                   (32px ではカードの縁とくり抜きが潰れて読めなくなるため)
+ * @param compact 32px 用の配置を使うか
  */
-function drawIcon(size, simplified) {
+function drawIcon(size, compact) {
   const u = size / 512; // 512基準の座標系
   const background = createBackground(size);
   const buf = Buffer.from(background);
   const cx = size / 2;
   const cy = size / 2;
+  const box = (spec, color, alpha) =>
+    fillRoundedBox(
+      buf, size, color, alpha,
+      cx + spec.dx * u, cy + spec.dy * u,
+      spec.w * u, spec.h * u, spec.radius * u, spec.angle ?? 0
+    );
 
-  if (simplified) {
-    drawYen(buf, size, "#ffffff", cx, cy, 268 * u, 40 * u);
+  if (compact) {
+    box(COMPACT.back, "#ffffff", COMPACT.back.alpha);
+    box(COMPACT.gap, { source: background }, 1);
+    box(COMPACT.front, "#ffffff", 1);
+    drawYen(
+      buf, size, { source: background },
+      cx + COMPACT.front.dx * u, cy + COMPACT.front.dy * u,
+      COMPACT.yen.capHeight * u, COMPACT.yen.stroke * u, COMPACT.yen
+    );
     return encodePng(size, buf);
   }
 
   for (const layer of CARD_LAYERS) {
-    fillRoundedBox(
-      buf, size, "#ffffff", layer.alpha,
-      cx + layer.dx * u, cy + layer.dy * u,
-      CARD.w * u, CARD.h * u, CARD.radius * u, layer.angle
-    );
+    box({ ...CARD, ...layer }, "#ffffff", layer.alpha);
   }
 
   // 前面のカードからくり抜く。背景の色をそのまま拾うため、下の紫が覗いて見える
@@ -279,14 +311,15 @@ if (contentRadius > SAFE_RADIUS) {
 console.log(`セーフゾーン: ${contentRadius.toFixed(1)} / ${SAFE_RADIUS} (余裕 ${(SAFE_RADIUS - contentRadius).toFixed(1)})`);
 
 const targets = [
-  { size: 512, simplified: false, name: "icon-512.png" },
-  { size: 192, simplified: false, name: "icon-192.png" },
-  { size: 180, simplified: false, name: "apple-icon.png" },
-  { size: 32, simplified: true, name: "favicon-32.png" },
+  { size: 512, compact: false, name: "icon-512.png" },
+  { size: 192, compact: false, name: "icon-192.png" },
+  { size: 180, compact: false, name: "apple-icon.png" },
+  // タブに出る小さなアイコン。潰れないよう配置を変える
+  { size: 32, compact: true, name: "favicon-32.png" },
 ];
 
-for (const { size, simplified, name } of targets) {
+for (const { size, compact, name } of targets) {
   const file = path.join(OUT_DIR, name);
-  fs.writeFileSync(file, drawIcon(size, simplified));
+  fs.writeFileSync(file, drawIcon(size, compact));
   console.log(`生成: ${name} (${size}px, ${fs.statSync(file).size} bytes)`);
 }
